@@ -1,6 +1,6 @@
 const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
-const play = require('play-dl');
+const ytdl = require('ytdl-core');
 
 const client = new Client({
   intents: [
@@ -16,9 +16,9 @@ const players = new Map();
 
 // Slash commands
 const commands = [
-  new SlashCommandBuilder().setName('play').setDescription('Play a song')
+  new SlashCommandBuilder().setName('play').setDescription('Play a YouTube link')
     .addStringOption(option =>
-      option.setName('song').setDescription('Song name or URL').setRequired(true)
+      option.setName('url').setDescription('YouTube URL').setRequired(true)
     ),
   new SlashCommandBuilder().setName('stop').setDescription('Stop music')
 ].map(cmd => cmd.toJSON());
@@ -28,24 +28,25 @@ client.once('ready', async () => {
 
   const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
-  try {
-    await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: commands }
-    );
-    console.log("✅ Slash commands ready");
-  } catch (err) {
-    console.log(err);
-  }
+  await rest.put(
+    Routes.applicationCommands(client.user.id),
+    { body: commands }
+  );
+
+  console.log("✅ Slash commands ready");
 });
 
 // PLAY FUNCTION
-async function playMusic(ctx, query) {
+async function playMusic(ctx, url) {
   try {
     const member = ctx.member;
     const channel = member.voice.channel;
 
     if (!channel) return ctx.reply("❌ Join voice channel first!");
+
+    if (!ytdl.validateURL(url)) {
+      return ctx.reply("❌ Send valid YouTube URL!");
+    }
 
     const connection = joinVoiceChannel({
       channelId: channel.id,
@@ -53,8 +54,8 @@ async function playMusic(ctx, query) {
       adapterCreator: channel.guild.voiceAdapterCreator
     });
 
-    const stream = await play.stream(query);
-    const resource = createAudioResource(stream.stream);
+    const stream = ytdl(url, { filter: "audioonly" });
+    const resource = createAudioResource(stream);
 
     const player = createAudioPlayer();
     player.play(resource);
@@ -66,21 +67,21 @@ async function playMusic(ctx, query) {
       connection.destroy();
     });
 
-    return ctx.reply(`🎵 Playing: ${query}`);
+    return ctx.reply(`🎵 Playing`);
   } catch (err) {
     console.log(err);
-    return ctx.reply("❌ Failed to play song!");
+    return ctx.reply("❌ Failed to play!");
   }
 }
 
-// Slash commands
+// Slash
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
   if (interaction.commandName === 'play') {
     await interaction.deferReply();
-    const song = interaction.options.getString('song');
-    await playMusic(interaction, song);
+    const url = interaction.options.getString('url');
+    await playMusic(interaction, url);
   }
 
   if (interaction.commandName === 'stop') {
@@ -90,7 +91,7 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-// Prefix commands
+// Prefix
 client.on('messageCreate', async message => {
   if (!message.content.startsWith(PREFIX) || message.author.bot) return;
 
@@ -98,8 +99,8 @@ client.on('messageCreate', async message => {
   const cmd = args.shift().toLowerCase();
 
   if (cmd === "play") {
-    const query = args.join(" ");
-    playMusic(message, query);
+    const url = args[0];
+    playMusic(message, url);
   }
 
   if (cmd === "stop") {
